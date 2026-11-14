@@ -631,7 +631,12 @@ function previewForm(p, target, extra = '') {
 function captureSharedLink() {
   const q = new URLSearchParams(location.search);
   if (!q.has('url') && !q.has('text')) return;
-  const candidates = [q.get('url'), q.get('text'), q.get('title')].filter(Boolean).join(' ');
+  // Raccourci iPhone : le lien peut arriver non encodé (avec ses propres « ? » et « & »),
+  // on prend donc tout ce qui suit « url= ».
+  let raw = '';
+  const i = location.search.indexOf('url=');
+  if (i > -1) { raw = location.search.slice(i + 4); try { raw = decodeURIComponent(raw); } catch { /* déjà lisible */ } }
+  const candidates = [raw, q.get('url'), q.get('text'), q.get('title')].filter(Boolean).join(' ');
   const m = candidates.match(/https?:\/\/[^\s"'<>]+/i);
   if (m) localStorage.setItem('cc_share', m[0]);
   history.replaceState(null, '', `${location.pathname}#/${m ? 'partager' : ''}`);
