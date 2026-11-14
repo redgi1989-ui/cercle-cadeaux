@@ -190,6 +190,7 @@ async function render() {
     if (r.name === 'cercle' && r.id) return await pageCircle(r.id, rid);
     if (r.name === 'liste' && r.id) return await pageList(r.id, rid);
     if (r.name === 'idees') return await pageIdeas(rid);
+    if (r.name === 'partager') return await pageShare(rid);
     return await pageHome(rid);
   } catch (err) {
     console.error(err);
@@ -603,9 +604,10 @@ function addForm(target) {
     </form>
     <div id="preview-slot"></div>`;
 }
-function previewForm(p, target) {
+function previewForm(p, target, extra = '') {
   const canKeep = target === 'gift' && (S.page.isMine || S.page.list?.person_id);
   return `<form data-form="save-item" data-target="${target}" class="preview" novalidate>
+    ${extra}
     <div class="preview-img" id="preview-img">${icon('gift', 44, 1.3)}${img(p.image)}</div>
     <label class="btn-ghost sm" style="align-self:flex-start;cursor:pointer">
       <input type="file" accept="image/*" data-change="photo" class="visually-hidden">
@@ -617,9 +619,66 @@ function previewForm(p, target) {
       <div class="field" style="flex:2 1 180px"><label for="i-note">Précision</label><input id="i-note" name="note" class="input" maxlength="200" placeholder="Taille, couleur…"></div>
     </div>
     ${canKeep ? `<label class="check"><input type="checkbox" name="keep" checked><span class="small">Garder aussi dans mes idées, pour les autres cercles</span></label>` : ''}
+    ${target === 'share' ? `<label class="check"><input type="checkbox" name="keep" checked><span class="small">Si c’est une liste : garder aussi dans mes idées</span></label>` : ''}
     <p class="error" hidden></p>
-    <div class="row"><button class="btn" style="flex:1">Ajouter</button><button type="button" class="btn-ghost" data-action="cancel-preview">Annuler</button></div>
+    <div class="row"><button class="btn" style="flex:1">Ajouter</button><button type="button" class="btn-ghost" data-action="${target === 'share' ? 'cancel-share' : 'cancel-preview'}">Annuler</button></div>
   </form>`;
+}
+
+// ---------------------------------------------------------------------
+// Lien reçu depuis le bouton « Partager » d'un autre site ou d'une autre appli
+// ---------------------------------------------------------------------
+function captureSharedLink() {
+  const q = new URLSearchParams(location.search);
+  if (!q.has('url') && !q.has('text')) return;
+  const candidates = [q.get('url'), q.get('text'), q.get('title')].filter(Boolean).join(' ');
+  const m = candidates.match(/https?:\/\/[^\s"'<>]+/i);
+  if (m) localStorage.setItem('cc_share', m[0]);
+  history.replaceState(null, '', `${location.pathname}#/${m ? 'partager' : ''}`);
+}
+
+async function pageShare(rid) {
+  applyTheme(APP);
+  const link = safeUrl(localStorage.getItem('cc_share') || '');
+  if (!link) {
+    return shell(`<main class="page"><h1 class="h1">Ajouter un cadeau</h1>
+      <div class="empty">Aucun lien reçu. Depuis un site, utilisez le bouton « Partager » et choisissez Cercle Cadeaux.</div></main>`, { tab: 'idees' });
+  }
+  const [ls, pp] = await Promise.all([
+    sb.from('lists').select('id, owner_user_id, managed_by, person_id, person_name, circles(name)').or(`owner_user_id.eq.${me()},managed_by.eq.${me()}`),
+    sb.from('people').select('id, name').eq('managed_by', me()).order('created_at')
+  ]);
+  if (rid !== S.renderId) return;
+  if (ls.error || pp.error) throw (ls.error || pp.error);
+  if (!S.sharePreview || S.sharePreview.source !== link) {
+    shell('<main class="page"><div class="loading">Recherche de l’aperçu…</div></main>', { tab: 'idees' });
+    const p = await fetchPreview(link);
+    if (rid !== S.renderId) return;
+    S.sharePreview = { ...p, source: link };
+  }
+  S.preview = { ...S.sharePreview };
+
+  const lists = (ls.data || []).filter((l) => l.circles);
+  const people = pp.data || [];
+  S.page = { shareLists: lists, isMine: true };
+  const options = [
+    `<optgroup label="Mes idées (réserve personnelle)">`,
+    `<option value="idea:">Pour moi</option>`,
+    ...people.map((p) => `<option value="idea:${p.id}">Pour ${esc(p.name)}</option>`),
+    '</optgroup>',
+    lists.length ? `<optgroup label="Directement dans une liste">` : '',
+    ...lists.map((l) => `<option value="list:${l.id}">${esc(l.circles.name)} · ${l.owner_user_id === me() ? 'Ma liste' : `Liste de ${esc(l.person_name)}`}</option>`),
+    lists.length ? '</optgroup>' : ''
+  ].join('');
+  const last = localStorage.getItem('cc_share_dest') || 'idea:';
+  const select = `<div class="field"><label for="share-dest">Ajouter dans</label>
+    <select id="share-dest" name="dest" class="input">${options.replace(`value="${last}"`, `value="${last}" selected`)}</select></div>`;
+
+  shell(`<main class="page">
+    <div class="stack-sm"><h1 class="h1">Ajouter un cadeau</h1>
+    <p class="lead ellipsis">${esc(siteOf(link))}</p></div>
+    ${previewForm(S.preview, 'share', select)}
+  </main>`, { tab: 'idees' });
 }
 async function fetchPreview(url) {
   const base = { url, site: siteOf(url), title: '', image: '', price: '', found: false };
@@ -778,6 +837,7 @@ const actions = {
   },
   'cancel-preview': () => { S.preview = null; const s = document.getElementById('preview-slot'); if (s) s.innerHTML = ''; const f = document.querySelector('[data-form="preview"]'); if (f) f.reset(); },
   'from-ideas': () => openFromIdeas(),
+  'cancel-share': () => { localStorage.removeItem('cc_share'); S.sharePreview = null; S.preview = null; location.hash = '#/'; },
   'ideas-for': (el) => { S.ideasPerson = el.dataset.id || null; render(); },
   'add-person': () => openSheet(`${sheetHead('Ajouter un proche', 'Un enfant, un grand-parent… quelqu’un sans compte dont vous gérez les idées.')}${personForm('add-person', 'Ajouter')}`),
   'delete-idea': async (el) => {
@@ -942,6 +1002,30 @@ const forms = {
     if (!title) return showError(f, 'Donnez un titre au cadeau.');
     const item = { title, url: p.url || null, image_url: p.image || null, site: p.site || null, price: f.price.value.trim() || null, note: f.note.value.trim() };
     busy(f, true);
+    if (f.dataset.target === 'share') {
+      const dest = f.dest.value;
+      localStorage.setItem('cc_share_dest', dest);
+      const [kind, id] = dest.split(':');
+      let error;
+      if (kind === 'idea') {
+        ({ error } = await sb.from('ideas').insert({ ...item, owner_user_id: me(), person_id: id || null }));
+      } else {
+        const l = (S.page.shareLists || []).find((x) => x.id === id);
+        let ideaId = null;
+        const pid = l?.owner_user_id === me() ? null : l?.person_id;
+        if (f.keep?.checked && (l?.owner_user_id === me() || pid)) {
+          const { data: idea } = await sb.from('ideas').insert({ ...item, owner_user_id: me(), person_id: pid || null }).select('id').single();
+          ideaId = idea?.id || null;
+        }
+        ({ error } = await sb.from('gifts').insert({ ...item, list_id: id, created_by: me(), idea_id: ideaId }));
+      }
+      busy(f, false);
+      if (error) return showError(f, 'Ajout impossible. Réessayez.');
+      localStorage.removeItem('cc_share'); S.sharePreview = null; S.preview = null;
+      toast('Cadeau ajouté');
+      if (kind === 'idea') { S.ideasPerson = id || null; location.hash = '#/idees'; } else location.hash = `#/liste/${id}`;
+      return;
+    }
     if (f.dataset.target === 'idea') {
       const { error } = await sb.from('ideas').insert({ ...item, owner_user_id: me(), person_id: S.ideasPerson || null });
       busy(f, false);
@@ -1028,6 +1112,7 @@ async function uploadPhoto(input) {
   if (error) { label.textContent = 'Ajouter une photo'; toast('Envoi de la photo impossible.'); return; }
   const url = sb.storage.from('gift-images').getPublicUrl(path).data.publicUrl;
   S.preview.image = url;
+  if (S.sharePreview) S.sharePreview.image = url;
   document.getElementById('preview-img').innerHTML = icon('gift', 44, 1.3) + img(url);
   label.textContent = 'Changer la photo';
   input.value = '';
@@ -1069,6 +1154,7 @@ function stopLive() { if (S.live) { sb.removeChannel(S.live); S.live = null; } }
 // Démarrage
 // ---------------------------------------------------------------------
 (async function start() {
+  captureSharedLink();
   const { data } = await sb.auth.getSession();
   S.session = data.session;
   if (/access_token|error_description/.test(location.hash)) history.replaceState(null, '', `${location.pathname}#/`);
