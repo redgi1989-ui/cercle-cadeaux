@@ -18,12 +18,13 @@ Application web (pour smartphone) de listes de souhaits partagées en cercles : 
 | `manifest.webmanifest`, `sw.js`, `icons/` | Installation sur l'écran d'accueil |
 | `supabase/schema.sql` | Base de données (à lancer en premier) |
 | `supabase/02_mes_idees.sql` | Ajout « Mes idées » (à lancer ensuite) |
+| `supabase/03_photos.sql` | Photos des cadeaux (à lancer en dernier) |
 | `supabase/functions/link-preview/index.ts` | Aperçu automatique des liens |
 
 ## Mise en route
 
 ### 1. Base de données (Supabase › SQL Editor)
-Lancer `supabase/schema.sql`, puis `supabase/02_mes_idees.sql`.
+Lancer `supabase/schema.sql`, puis `supabase/02_mes_idees.sql`, puis `supabase/03_photos.sql`.
 
 ### 2. Connexion par e-mail + mot de passe (Supabase › Authentication)
 **Sign In / Providers › Email** : désactiver **Confirm email** › *Save*

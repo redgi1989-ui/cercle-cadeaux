@@ -606,7 +606,10 @@ function addForm(target) {
 function previewForm(p, target) {
   const canKeep = target === 'gift' && (S.page.isMine || S.page.list?.person_id);
   return `<form data-form="save-item" data-target="${target}" class="preview" novalidate>
-    <div class="preview-img">${icon('gift', 44, 1.3)}${img(p.image)}</div>
+    <div class="preview-img" id="preview-img">${icon('gift', 44, 1.3)}${img(p.image)}</div>
+    <label class="btn-ghost sm" style="align-self:flex-start;cursor:pointer">
+      <input type="file" accept="image/*" data-change="photo" class="visually-hidden">
+      <span id="photo-label">${p.image ? 'Changer la photo' : 'Ajouter une photo'}</span></label>
     ${p.site ? `<p class="hint">${p.found ? `${icon('check', 14, 2.4)} Aperçu récupéré sur ${esc(p.site)}` : `Aperçu indisponible pour ${esc(p.site)} : complétez le titre à la main.`}</p>` : ''}
     <div class="field"><label for="i-title">Titre</label><input id="i-title" name="title" class="input" maxlength="200" required value="${esc(p.title)}"></div>
     <div class="row">
@@ -1003,7 +1006,35 @@ document.addEventListener('input', (e) => {
   const help = document.getElementById('code-help');
   if (help) help.textContent = codeHelp(S.draft);
 });
+// Réduit une photo avant envoi (plus rapide, moins de stockage)
+async function resizeImage(file, max = 900) {
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    return await new Promise((resolve) => c.toBlob((b) => resolve(b || file), 'image/jpeg', 0.82));
+  } catch { return file; }
+}
+async function uploadPhoto(input) {
+  const file = input.files?.[0];
+  if (!file || !S.preview) return;
+  const label = document.getElementById('photo-label');
+  label.textContent = 'Envoi de la photo…';
+  const blob = await resizeImage(file);
+  const path = `${me()}/${Date.now()}.jpg`;
+  const { error } = await sb.storage.from('gift-images').upload(path, blob, { contentType: 'image/jpeg' });
+  if (error) { label.textContent = 'Ajouter une photo'; toast('Envoi de la photo impossible.'); return; }
+  const url = sb.storage.from('gift-images').getPublicUrl(path).data.publicUrl;
+  S.preview.image = url;
+  document.getElementById('preview-img').innerHTML = icon('gift', 44, 1.3) + img(url);
+  label.textContent = 'Changer la photo';
+  input.value = '';
+}
+
 document.addEventListener('change', async (e) => {
+  if (e.target.dataset.change === 'photo') return uploadPhoto(e.target);
   const f = e.target.form;
   if (f?.dataset.form === 'create' && S.draft && e.target.name === 'see') S.draft.see = e.target.checked;
   if (e.target.dataset.change === 'toggle-see') {
