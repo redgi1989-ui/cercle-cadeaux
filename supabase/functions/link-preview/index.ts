@@ -116,6 +116,15 @@ function amazon(html: string) {
   return out;
 }
 
+// Enlève les mentions promotionnelles et le nom du magasin autour du titre
+function cleanTitle(t: string) {
+  let s = t.trim();
+  s = s.replace(/^(offres?|promo(tions?)?|soldes)?\s*(black\s*friday|cyber\s*monday|soldes)\s*[|Il:–-]\s*/i, '');
+  s = s.replace(/^amazon\.[a-z.]+\s*:\s*/i, '');
+  s = s.replace(/\s*[|–:-]\s*(media\s*markt|amazon|fnac|bol(\.com)?|coolblue|decathlon|ikea|kiabi|zalando|cdiscount|vanden\s*borre|krëfel|krefel|lego|king\s*jouet|intertoys|dreamland|etsy)\b[^|]*$/i, '');
+  return s.trim();
+}
+
 function isBlocked(html: string) {
   return /captcha|validateCaptcha|api-services-support@amazon|Robot Check|Access Denied/i.test(html.slice(0, 60000));
 }
@@ -185,14 +194,16 @@ Deno.serve(async (req) => {
     // Un titre réduit au nom du site (ex. « Amazon.fr ») n'est pas un vrai titre de produit
     if (/^amazon(\.[a-z.]+)?$/i.test(title.trim())) title = '';
 
+    let via = blocked ? 'secours' : 'direct';
     if (!title || !image) {
       const fb = await fallback(finalUrl.href);
       if (!/^amazon(\.[a-z.]+)?$/i.test(fb.title.trim())) title = title || fb.title;
       image = image || fb.image;
+      if (blocked && !fb.title && !fb.image) via = 'bloque';
     }
     if (image) { try { image = new URL(image, finalUrl).href; } catch { image = ''; } }
 
-    return json({ site, url: finalUrl.href, title: title.slice(0, 200), image, price });
+    return json({ site, url: finalUrl.href, title: cleanTitle(title).slice(0, 200), image, price, via });
   } catch (_e) {
     return json({ error: 'Aperçu indisponible' });
   }

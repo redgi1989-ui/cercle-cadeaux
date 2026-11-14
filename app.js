@@ -613,6 +613,7 @@ function previewForm(p, target, extra = '') {
       <input type="file" accept="image/*" data-change="photo" class="visually-hidden">
       <span id="photo-label">${p.image ? 'Changer la photo' : 'Ajouter une photo'}</span></label>
     ${p.site ? `<p class="hint">${p.found ? `${icon('check', 14, 2.4)} Aperçu récupéré sur ${esc(p.site)}` : `Aperçu indisponible pour ${esc(p.site)} : complétez le titre à la main.`}</p>` : ''}
+    ${p.site && p.found && !p.price ? `<p class="hint">${esc(p.site)} ne communique pas son prix : ajoutez-le à la main si vous le souhaitez.</p>` : ''}
     <div class="field"><label for="i-title">Titre</label><input id="i-title" name="title" class="input" maxlength="200" required value="${esc(p.title)}"></div>
     <div class="row">
       <div class="field" style="flex:1 1 120px"><label for="i-price">Prix</label><input id="i-price" name="price" class="input" maxlength="30" value="${esc(p.price)}" placeholder="Ex. 25 €"></div>
@@ -693,7 +694,7 @@ async function fetchPreview(url) {
     return {
       url: safeUrl(data.url) || url, site: data.site || base.site,
       title: data.title || '', image: safeUrl(data.image), price: data.price || '',
-      found: !!(data.title || data.image)
+      found: !!(data.title || data.image), via: data.via || ''
     };
   } catch { return base; }
 }
