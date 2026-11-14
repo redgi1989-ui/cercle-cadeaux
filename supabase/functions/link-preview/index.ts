@@ -39,11 +39,52 @@ function blockedHost(h: string) {
     || h.endsWith('.local') || h.endsWith('.internal');
 }
 
+// Convertit « 399 », « 399.00 », « 399,00 », « 1.299,00 », « 1 299,00 » en nombre
+function toNumber(a: string) {
+  let s = String(a).replace(/[^\d.,]/g, '');
+  const dec = Math.max(s.lastIndexOf(','), s.lastIndexOf('.'));
+  if (dec > -1 && s.length - dec - 1 <= 2) s = s.slice(0, dec).replace(/[.,]/g, '') + '.' + s.slice(dec + 1);
+  else s = s.replace(/[.,]/g, '');
+  return parseFloat(s);
+}
+
 function formatPrice(amount: string, currency: string) {
-  const n = parseFloat(amount.replace(/\s/g, '').replace(',', '.'));
+  const n = toNumber(amount);
   if (!isFinite(n) || n <= 0) return '';
   const value = n.toFixed(2).replace('.', ',');
   return `${value} ${!currency || currency === 'EUR' ? '€' : currency}`;
+}
+
+// Prix du produit principal, d'après les données structurées (JSON-LD) de la page
+function jsonLdPrice(html: string) {
+  const blocks = html.match(/<script[^>]+application\/ld\+json[^>]*>[\s\S]*?<\/script>/gi) || [];
+  for (const b of blocks) {
+    const raw = b.replace(/^<script[^>]*>/i, '').replace(/<\/script>$/i, '').trim();
+    // deno-lint-ignore no-explicit-any
+    let data: any;
+    try { data = JSON.parse(raw); } catch { continue; }
+    // deno-lint-ignore no-explicit-any
+    const stack: any[] = [data];
+    while (stack.length) {
+      const n = stack.shift();
+      if (!n || typeof n !== 'object') continue;
+      if (Array.isArray(n)) { stack.push(...n); continue; }
+      if (n['@graph']) stack.push(n['@graph']);
+      const type = [].concat(n['@type'] || []).join(' ');
+      if (/Product/i.test(type) && n.offers) {
+        for (const o of [].concat(n.offers)) {
+          // deno-lint-ignore no-explicit-any
+          const offer: any = o;
+          const amount = offer?.price ?? offer?.lowPrice ?? offer?.priceSpecification?.price
+            ?? offer?.offers?.[0]?.price;
+          if (amount != null && amount !== '') {
+            return { amount: String(amount), currency: offer.priceCurrency || offer.priceSpecification?.priceCurrency || '' };
+          }
+        }
+      }
+    }
+  }
+  return null;
 }
 
 // Pages Amazon : image, titre et prix sont à des endroits particuliers
@@ -60,9 +101,18 @@ function amazon(html: string) {
     const dyn = html.match(/data-a-dynamic-image=["']\{&quot;(https:[^&]+)&quot;/i) || html.match(/data-a-dynamic-image=["']\{"(https:[^"]+)"/i);
     if (dyn) out.image = dyn[1];
   }
-  const p = html.match(/class=["']a-offscreen["'][^>]*>\s*([\d\s.,]+)\s*(?:&nbsp;)?\s*€/i)
-    || html.match(/class=["']a-offscreen["'][^>]*>\s*€\s*([\d\s.,]+)/i);
-  if (p) out.price = formatPrice(p[1].replace(/\.(?=\d{3})/g, ''), 'EUR');
+  // Le prix du produit principal se trouve dans le bloc « corePrice » ;
+  // ailleurs dans la page, il y a les prix d'autres produits ou d'options.
+  const pa = html.match(/"priceAmount"\s*:\s*([\d.]+)/);
+  if (pa) out.price = formatPrice(pa[1], 'EUR');
+  if (!out.price) {
+    const start = html.search(/id=["'](corePriceDisplay_desktop_feature_div|corePrice_feature_div|corePriceDisplay_mobile_feature_div|apex_desktop)["']/i);
+    if (start > -1) {
+      const zone = html.slice(start, start + 8000);
+      const p = zone.match(/class=["']a-offscreen["'][^>]*>([^<]+)</i);
+      if (p) out.price = formatPrice(decode(p[1]), 'EUR');
+    }
+  }
   return out;
 }
 
@@ -118,13 +168,16 @@ Deno.serve(async (req) => {
       }
       image = image || meta(html, 'og:image:secure_url') || meta(html, 'og:image') || meta(html, 'twitter:image') || meta(html, 'twitter:image:src');
       if (!price) {
-        let amount = meta(html, 'product:price:amount') || meta(html, 'og:price:amount') || meta(html, 'price');
-        let currency = meta(html, 'product:price:currency') || meta(html, 'og:price:currency') || meta(html, 'priceCurrency');
+        // Ordre de confiance : balises produit > données structurées > balise « price »
+        let amount = meta(html, 'product:price:amount') || meta(html, 'og:price:amount');
+        let currency = meta(html, 'product:price:currency') || meta(html, 'og:price:currency');
         if (!amount) {
-          const p = html.match(/"price"\s*:\s*"?(\d+(?:[.,]\d{1,2})?)"?/);
-          if (p) amount = p[1];
-          const c = html.match(/"priceCurrency"\s*:\s*"([A-Z]{3})"/);
-          if (c) currency = c[1];
+          const ld = jsonLdPrice(html);
+          if (ld) { amount = ld.amount; currency = ld.currency; }
+        }
+        if (!amount) {
+          amount = meta(html, 'price');
+          currency = currency || meta(html, 'priceCurrency');
         }
         if (amount) price = formatPrice(amount, currency);
       }
