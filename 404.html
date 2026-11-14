@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cercle Cadeaux</title>
+<script>
+  // Rattrape les adresses déformées (par exemple par un raccourci iPhone)
+  // et renvoie vers l'appli en gardant le lien du produit.
+  (function () {
+    var base = '/cercle-cadeaux/';
+    var full = location.pathname + location.search + location.hash;
+    try { full = decodeURIComponent(full); } catch (e) {}
+    var i = full.indexOf(base);
+    var rest = i > -1 ? full.slice(i + base.length) : full.replace(/^\//, '');
+    var m = rest.match(/https?:\/*[^\s]+/i);
+    if (m) {
+      var link = m[0].replace(/^(https?):\/*/i, '$1://');
+      location.replace(base + '?url=' + encodeURIComponent(link));
+    } else {
+      location.replace(base);
+    }
+  })();
+</script>
+</head>
+<body><p style="font-family:sans-serif;text-align:center;margin-top:40vh">Redirection…</p></body>
+</html>
